@@ -134,6 +134,133 @@ button{cursor:pointer}
     </div>
   </header>
 </main>
+<script>
+(() => {
+  'use strict';
+  const SOURCE_HD = 'https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/409763c0-95f4-49d3-a601-dc564d55072b.mp4';
+  const SOURCE_SMALL = 'https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/b3718419-7a0a-478d-bfb0-0ff8bef7f3f7.mp4';
+  const A = 2.4, DURATION = 4.04, END_TIME = DURATION - 1 / 48;
+  const clamp = (x, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));
+  const track = document.querySelector('.track');
+  const scene = document.getElementById('scene');
+  const video = document.getElementById('film');
+  const band = document.getElementById('band');
+  const strip = document.getElementById('strip');
+  const letters = document.getElementById('giant');
+  const number = document.getElementById('speedNum');
+  const cards = Array.from(document.querySelectorAll('.service'));
+  const menuTrigger = document.getElementById('menuTrigger');
+  const menuPanel = document.getElementById('menuPanel');
+  const recMode = new URLSearchParams(location.search).get('rec') === '1';
+  let vw = 0, vh = 0, B = 1, stripWidth = 0, lettersWidth = 0;
+  let cardOffsets = [], lastY = window.scrollY, lastTs = 0, speed = 0;
+  let cur = 0, wanted = 0, lastRequested = -1, source = '';
+  let recLastSeconds = 0;
 
+  // Source selection happens before loading. Never call play(): scroll owns the film.
+  function pickSource() {
+    const next = innerWidth <= 900 ? SOURCE_SMALL : SOURCE_HD;
+    if (next === source) return;
+    source = next;
+    const keep = Math.max(0, Math.min(video.currentTime || 0, END_TIME));
+    video.src = source;
+    video.load();
+    if (keep) video.addEventListener('loadedmetadata', () => { video.currentTime = keep; }, {once:true});
+  }
+
+  function measure() {
+    vw = window.innerWidth;
+    vh = window.innerHeight;
+    const phone = vw < 768 || vw <= vh;
+    const u = phone ? Math.min(vw / 430, 1.4) : Math.min(vw / 1440, vh / 960);
+    document.documentElement.style.setProperty('--u', `${u}px`);
+    // Source is 1920 × 1080. Only positioning/sizing happens in code.
+    let w, h, left, top;
+    if (phone) {
+      w = vw * 1.55;
+      h = w * 1080 / 1920;
+      left = vw * .5 - w * .4;
+      top = vh * .36 - h * .448;
+    } else {
+      const scale = Math.max(vw / 1920, vh / 1080);
+      w = 1920 * scale;
+      h = 1080 * scale;
+      left = (vw - w) / 2;
+      top = (vh - h) / 2;
+    }
+    Object.assign(video.style, {width:`${w}px`,height:`${h}px`,left:`${left}px`,top:`${top}px`});
+    scene.style.setProperty('--edge-px', `${top + h * .448}px`);
+    // Wait for layout to calculate widths; CSS dimensions depend on --u.
+    stripWidth = strip.scrollWidth;
+    lettersWidth = letters.scrollWidth;
+    cardOffsets = cards.map(card => card.offsetLeft);
+    B = (stripWidth + .45 * vw) / vw * 1.1;
+    track.style.height = `${(1 + A + B) * vh}px`;
+    pickSource();
+    frameLayout();
+  }
+
+  function progress() {
+    const y = clamp(window.scrollY, 0, A * vh + B * vh);
+    return { q: clamp(y / (A * vh)), r: clamp((y - A * vh) / (B * vh)) };
+  }
+
+  function frameLayout() {
+    if (!vh) return;
+    const {q,r} = progress();
+    wanted = q * END_TIME;
+    // The band only covers the film after the final black edge has risen.
+    band.classList.toggle('is-live', q >= .94);
+    scene.style.setProperty('--ph', q >= .94 ? '1' : '0');
+    const stripX = vw - r * (stripWidth + .45 * vw);
+    const lettersX = vw - r * (lettersWidth + vw);
+    scene.style.setProperty('--strip-x', `${stripX}px`);
+    scene.style.setProperty('--letters-x', `${lettersX}px`);
+    for (let i = 0; i < cards.length; ++i) {
+      const left = stripX + cardOffsets[i];
+      const s = clamp((.98 - left / vw) / .3, -.4, 1.6) * 100;
+      cards[i].style.setProperty('--s', `${s}%`);
+    }
+  }
+
+  function requestSeek(time, force = false) {
+    if (video.readyState < 1) return;
+    const t = clamp(time, 0, END_TIME);
+    if (!force && (video.seeking || Math.abs(t - video.currentTime) <= 1 / 60)) return;
+    if (Math.abs(video.currentTime - t) < .0001) return;
+    lastRequested = t;
+    try { video.currentTime = t; } catch (_) { /* metadata not ready on this device */ }
+  }
+
+  // seeked lets slow decoders catch up without stacking outstanding seeks.
+  video.addEventListener('seeked', () => {
+    if (!recMode) requestSeek(cur);
+  });
+  video.addEventListener('loadedmetadata', () => requestSeek(recMode ? wanted : cur));
+  video.addEventListener('play', () => video.pause());
+  video.pause();
+
+  function tick(ts) {
+    const dt = lastTs ? Math.max(1, ts - lastTs) : 16.667;
+    lastTs = ts;
+    frameLayout();
+    if (!recMode) {
+      const y = window.scrollY;
+      const raw = Math.min(99, Math.abs(y - lastY) / dt * 1000 / 32);
+      speed += (raw - speed) * .2;
+      lastY = y;
+      number.textContent = String(Math.round(clamp(speed,0,99))).padStart(2,'0');
+      cur += (wanted - cur) * .2;
+      requestSeek(cur);
+    }
+    requestAnimationFrame(tick);
+  }
+
+    addEventListener('resize', measure, {passive:true});
+  document.fonts.ready.then(measure);
+  measure();
+  requestAnimationFrame(tick);
+})();
+</script>
 </body>
 </html>
