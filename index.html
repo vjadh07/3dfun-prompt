@@ -256,7 +256,67 @@ button{cursor:pointer}
     requestAnimationFrame(tick);
   }
 
-    addEventListener('resize', measure, {passive:true});
+  // Recorder: hold 0–4%, cubic-bezier from 4–96%, then hold to 11s.
+  // Sampling an actual paused Web Animation gives exactly the browser's cubic easing.
+  if (recMode) {
+    const sampler = document.createElement('div');
+    sampler.style.cssText = 'position:fixed;pointer-events:none;opacity:0;z-index:-1000';
+    scene.append(sampler);
+    const anim = sampler.animate([
+      {opacity:'0',offset:0},
+      {opacity:'0',offset:.04,easing:'cubic-bezier(.4,.05,.55,.95)'},
+      {opacity:'1',offset:.96},
+      {opacity:'1',offset:1}
+    ], {duration:11000,fill:'both'});
+    anim.pause();
+    function sample(t) {
+      anim.currentTime = clamp(t, 0, 11) * 1000;
+      return clamp(parseFloat(getComputedStyle(sampler).opacity) || 0);
+    }
+    window.__recTime = (_video, seconds) => {
+      const t = clamp(Number(seconds) || 0, 0, 11);
+      const p = sample(t);
+      const maxY = (A + B) * vh;
+      scrollTo({left:0,top:p * maxY,behavior:'instant'});
+      frameLayout();
+      const step = 1/60;
+      const p1 = sample(Math.max(0,t-step));
+      const p2 = sample(Math.min(11,t+step));
+      const scriptedSpeed = clamp(Math.abs(p2-p1)*maxY/(2*step*32),0,99);
+      number.textContent = String(Math.round(scriptedSpeed)).padStart(2,'0');
+      recLastSeconds = t;
+      cur = wanted;
+      // Recorder controls are allowed to seek straight to the exact target.
+      requestSeek(cur, true);
+      return cur;
+    };
+    // A recorder can select any time, in any order; no auto-play or wall-clock timer.
+    window.__recTime(video, 0);
+  }
+
+  // Useful keyboard/focus controls while retaining the nav's scroll-away behavior.
+  menuTrigger.addEventListener('click', e => {
+    e.preventDefault();
+    const open = menuPanel.classList.toggle('open');
+    menuTrigger.setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', e => {
+    if (!menuPanel.contains(e.target) && e.target !== menuTrigger) {
+      menuPanel.classList.remove('open');
+      menuTrigger.setAttribute('aria-expanded','false');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {menuPanel.classList.remove('open');menuTrigger.setAttribute('aria-expanded','false');}
+  });
+  menuPanel.querySelector('[data-jump]').addEventListener('click', e => {
+    e.preventDefault();
+    menuPanel.classList.remove('open');
+    menuTrigger.setAttribute('aria-expanded','false');
+    scrollTo({top:A*vh + Math.min(.22*B*vh, vh*.75),behavior:'smooth'});
+  });
+
+  addEventListener('resize', measure, {passive:true});
   document.fonts.ready.then(measure);
   measure();
   requestAnimationFrame(tick);
